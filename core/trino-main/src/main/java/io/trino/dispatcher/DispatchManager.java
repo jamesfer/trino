@@ -43,6 +43,7 @@ import io.trino.spi.QueryId;
 import io.trino.spi.TrinoException;
 import io.trino.spi.resourcegroups.SelectionContext;
 import io.trino.spi.resourcegroups.SelectionCriteria;
+import io.trino.sql.planner.Plan;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.weakref.jmx.Flatten;
@@ -154,6 +155,11 @@ public class DispatchManager
 
     public ListenableFuture<Void> createQuery(QueryId queryId, Span querySpan, Slug slug, SessionContext sessionContext, String query)
     {
+        return createQuery(queryId, querySpan, slug, sessionContext, query, Optional.empty());
+    }
+
+    public ListenableFuture<Void> createQuery(QueryId queryId, Span querySpan, Slug slug, SessionContext sessionContext, String query, Optional<io.substrait.plan.Plan> substraitPlan)
+    {
         requireNonNull(queryId, "queryId is null");
         requireNonNull(querySpan, "querySpan is null");
         requireNonNull(sessionContext, "sessionContext is null");
@@ -171,7 +177,7 @@ public class DispatchManager
                     .setParent(Context.current().with(querySpan))
                     .startSpan();
             try (var ignored = scopedSpan(span)) {
-                createQueryInternal(queryId, querySpan, slug, sessionContext, query, resourceGroupManager);
+                createQueryInternal(queryId, querySpan, slug, sessionContext, query, resourceGroupManager, substraitPlan);
             }
             finally {
                 queryCreationFuture.set(null);
@@ -184,7 +190,7 @@ public class DispatchManager
      * Creates and registers a dispatch query with the query tracker.  This method will never fail to register a query with the query
      * tracker.  If an error occurs while creating a dispatch query, a failed dispatch will be created and registered.
      */
-    private <C> void createQueryInternal(QueryId queryId, Span querySpan, Slug slug, SessionContext sessionContext, String query, ResourceGroupManager<C> resourceGroupManager)
+    private <C> void createQueryInternal(QueryId queryId, Span querySpan, Slug slug, SessionContext sessionContext, String query, ResourceGroupManager<C> resourceGroupManager, Optional<io.substrait.plan.Plan> substraitPlan)
     {
         Session session = null;
         PreparedQuery preparedQuery = null;
@@ -224,7 +230,8 @@ public class DispatchManager
                     query,
                     preparedQuery,
                     slug,
-                    selectionContext.getResourceGroupId());
+                    selectionContext.getResourceGroupId(),
+                    substraitPlan);
 
             boolean queryAdded = queryCreated(dispatchQuery);
             if (queryAdded && !dispatchQuery.isDone()) {

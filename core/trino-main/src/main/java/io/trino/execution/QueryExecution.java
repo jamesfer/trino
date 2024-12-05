@@ -88,7 +88,12 @@ public interface QueryExecution
 
     interface QueryExecutionFactory<T extends QueryExecution>
     {
-        T createQueryExecution(PreparedQuery preparedQuery, QueryStateMachine stateMachine, Slug slug, WarningCollector warningCollector, PlanOptimizersStatsCollector planOptimizersStatsCollector);
+        default T createQueryExecution(PreparedQuery preparedQuery, QueryStateMachine stateMachine, Slug slug, WarningCollector warningCollector, PlanOptimizersStatsCollector planOptimizersStatsCollector)
+        {
+            return createQueryExecution(preparedQuery, stateMachine, slug, warningCollector, planOptimizersStatsCollector, Optional.empty());
+        }
+
+        T createQueryExecution(PreparedQuery preparedQuery, QueryStateMachine stateMachine, Slug slug, WarningCollector warningCollector, PlanOptimizersStatsCollector planOptimizersStatsCollector, Optional<io.substrait.plan.Plan> substraitPlan);
     }
 
     /**

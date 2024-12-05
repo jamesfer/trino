@@ -318,6 +318,18 @@ public class DataDefinitionExecution<T extends Statement>
             return createDataDefinitionExecution(preparedQuery.getStatement(), preparedQuery.getParameters(), stateMachine, slug, warningCollector);
         }
 
+        @Override
+        public DataDefinitionExecution<?> createQueryExecution(
+                PreparedQuery preparedQuery,
+                QueryStateMachine stateMachine,
+                Slug slug,
+                WarningCollector warningCollector,
+                PlanOptimizersStatsCollector planOptimizersStatsCollector,
+                Optional<io.substrait.plan.Plan> substraitPlan)
+        {
+            throw new UnsupportedOperationException();
+        }
+
         private <T extends Statement> DataDefinitionExecution<T> createDataDefinitionExecution(
                 T statement,
                 List<Expression> parameters,

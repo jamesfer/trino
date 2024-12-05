@@ -17,6 +17,7 @@ import io.trino.Session;
 import io.trino.execution.QueryPreparer.PreparedQuery;
 import io.trino.server.protocol.Slug;
 import io.trino.spi.resourcegroups.ResourceGroupId;
+import io.trino.sql.planner.Plan;
 import io.trino.transaction.TransactionId;
 
 import java.util.Optional;
@@ -29,5 +30,6 @@ public interface DispatchQueryFactory
             String query,
             PreparedQuery preparedQuery,
             Slug slug,
-            ResourceGroupId resourceGroup);
+            ResourceGroupId resourceGroup,
+            Optional<io.substrait.plan.Plan> substraitPlan);
 }

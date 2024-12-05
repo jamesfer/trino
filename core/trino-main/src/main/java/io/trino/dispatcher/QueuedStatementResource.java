@@ -20,6 +20,8 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import com.google.errorprone.annotations.ThreadSafe;
 import com.google.inject.Inject;
+import com.google.protobuf.InvalidProtocolBufferException;
+import com.google.protobuf.util.JsonFormat;
 import io.airlift.log.Logger;
 import io.airlift.units.Duration;
 import io.opentelemetry.api.trace.Span;
@@ -41,6 +43,7 @@ import io.trino.server.security.ResourceSecurity;
 import io.trino.spi.ErrorCode;
 import io.trino.spi.QueryId;
 import io.trino.spi.security.Identity;
+import io.trino.substrait.CustomProtoPlanConverter;
 import io.trino.tracing.TrinoAttributes;
 import jakarta.annotation.Nullable;
 import jakarta.annotation.PostConstruct;
@@ -64,13 +67,17 @@ import jakarta.ws.rs.core.Response.Status;
 import jakarta.ws.rs.core.UriBuilder;
 import jakarta.ws.rs.core.UriInfo;
 
+import java.io.IOException;
 import java.net.URI;
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -105,6 +112,58 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 @Path("/v1/statement")
 public class QueuedStatementResource
 {
+    private static final ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
+    static {
+        final var value = io.substrait.proto.Expression.Literal.newBuilder()
+                .setI32(42)
+                .build();
+        final var expression = io.substrait.proto.Expression.Literal.Struct.newBuilder()
+                .addFields(value)
+                .build();
+        final var virtualTable = io.substrait.proto.ReadRel.VirtualTable.newBuilder()
+                .addValues(expression)
+                .build();
+        final var schemaStruct = io.substrait.proto.Type.Struct.newBuilder()
+                .addTypes(io.substrait.proto.Type.newBuilder().setI32(io.substrait.proto.Type.I32.newBuilder().build()))
+                .build();
+        final var schemaNamedStruct = io.substrait.proto.NamedStruct.newBuilder()
+                .addNames("a")
+                .setStruct(schemaStruct);
+        final var read = io.substrait.proto.ReadRel.newBuilder()
+                .setBaseSchema(schemaNamedStruct)
+                .setVirtualTable(virtualTable)
+                .build();
+        final var rel = io.substrait.proto.Rel.newBuilder()
+                .setRead(read)
+                .build();
+        final var relRoot = io.substrait.proto.RelRoot.newBuilder()
+                .addAllNames(List.of("a"))
+                .setInput(rel)
+                .build();
+        final var planRel = io.substrait.proto.PlanRel.newBuilder()
+                .setRoot(relRoot)
+                .build();
+        final var plan = io.substrait.proto.Plan.newBuilder()
+                .addRelations(planRel)
+                .build();
+
+        executor.schedule(
+                () -> {
+                    Logger log = Logger.get(QueuedStatementResource.class);
+                    log.info("Printing substrait plan");
+                    try {
+                        log.info(JsonFormat.printer().print(plan));
+                    } catch (InvalidProtocolBufferException e) {
+                        log.error("Failed to print substrait plan, %s%n", e);
+                    }
+                },
+                2000,
+                TimeUnit.MILLISECONDS
+        );
+    }
+
+
+
     private static final Logger log = Logger.get(QueuedStatementResource.class);
     private static final Duration MAX_WAIT_TIME = new Duration(1, SECONDS);
     private static final Ordering<Comparable<Duration>> WAIT_ORDERING = Ordering.natural().nullsLast();
@@ -172,7 +231,58 @@ public class QueuedStatementResource
         return createQueryResultsResponse(query.getQueryResults(query.getLastToken(), uriInfo));
     }
 
-    private Query registerQuery(String statement, HttpServletRequest servletRequest, HttpHeaders httpHeaders)
+    @ResourceSecurity(AUTHENTICATED_USER)
+    @POST
+    @Path("substrait")
+    @Produces(APPLICATION_JSON)
+    public Response postSubstraitStatement(
+            String substraitJson,
+            @Context HttpServletRequest servletRequest,
+            @Context HttpHeaders httpHeaders,
+            @BeanParam ExternalUriInfo externalUriInfo)
+    {
+        if (isNullOrEmpty(substraitJson)) {
+            throw new BadRequestException("Substrait JSON is empty");
+        }
+
+        // Try to parse the substrait string into the protobuf class
+        final var substraitPlanBuilder = io.substrait.proto.Plan.newBuilder();
+        try {
+            JsonFormat.parser()
+                    .usingTypeRegistry(com.google.protobuf.TypeRegistry.newBuilder()
+                            .add(extensions.tables.Extensions.EventPlatformExtensionTable.getDescriptor())
+                            .add(extensions.tables.Extensions.TableFunctionCall.getDescriptor())
+                            .build())
+                    .merge(substraitJson, substraitPlanBuilder);
+        } catch (InvalidProtocolBufferException e) {
+            throw new BadRequestException("Invalid Substrait JSON. Error: %s".formatted(e.getMessage()), e);
+        }
+
+        // Convert the protobuf class into a Substrait Plan object
+        final var substraitProtobufPlan = substraitPlanBuilder.build();
+        log.info("Received Substrait plan: %s".formatted(substraitProtobufPlan));
+        io.substrait.plan.Plan substraitPlan;
+        try {
+            final var protoPlanConverter = new CustomProtoPlanConverter();
+            substraitPlan = protoPlanConverter.from(substraitProtobufPlan);
+        } catch (IOException e) {
+            throw new BadRequestException("Failed to convert Substrait protobuf plan to Substrait object", e);
+        }
+
+        // Convert substrait plan to Trino plan
+//        Plan trinoPlan;
+//        try {
+//            trinoPlan = SubstraitToTrinoConverter.convert(substraitPlan);
+//        } catch (Exception e) {
+//            throw new BadRequestException("Failed to convert Substrait plan to Trino plan. Error: %s".formatted(e.getMessage()), e);
+//        }
+
+        final var placeholderSqlQuery = "SELECT 'This is a substrait query'";
+        Query query = registerQuery(placeholderSqlQuery, Optional.of(substraitPlan), servletRequest, httpHeaders);
+        return createQueryResultsResponse(query.getQueryResults(query.getLastToken(), externalUriInfo), query.sessionContext.getQueryDataEncoding());
+    }
+
+    private Query registerQuery(String statement, Optional<io.substrait.plan.Plan> substraitPlan, HttpServletRequest servletRequest, HttpHeaders httpHeaders)
     {
         Optional<String> remoteAddress = Optional.ofNullable(servletRequest.getRemoteAddr());
         Optional<Identity> identity = authenticatedIdentity(servletRequest);
@@ -183,7 +293,7 @@ public class QueuedStatementResource
         MultivaluedMap<String, String> headers = httpHeaders.getRequestHeaders();
 
         SessionContext sessionContext = sessionContextFactory.createSessionContext(headers, remoteAddress, identity);
-        Query query = new Query(statement, sessionContext, dispatchManager, queryInfoUrlFactory, tracer);
+        Query query = new Query(statement, substraitPlan, sessionContext, dispatchManager, queryInfoUrlFactory, tracer);
         queryManager.registerQuery(query);
 
         // let authentication filter know that identity lifecycle has been handed off
@@ -309,6 +419,7 @@ public class QueuedStatementResource
     private static final class Query
     {
         private final String query;
+        private final Optional<io.substrait.plan.Plan> substraitPlan;
         private final SessionContext sessionContext;
         private final DispatchManager dispatchManager;
         private final QueryId queryId;
@@ -321,9 +432,10 @@ public class QueuedStatementResource
         private final AtomicReference<Boolean> submissionGate = new AtomicReference<>();
         private final SettableFuture<Void> creationFuture = SettableFuture.create();
 
-        public Query(String query, SessionContext sessionContext, DispatchManager dispatchManager, QueryInfoUrlFactory queryInfoUrlFactory, Tracer tracer)
+        public Query(String query, Optional<io.substrait.plan.Plan> substraitPlan, SessionContext sessionContext, DispatchManager dispatchManager, QueryInfoUrlFactory queryInfoUrlFactory, Tracer tracer)
         {
             this.query = requireNonNull(query, "query is null");
+            this.substraitPlan = requireNonNull(substraitPlan, "substraitPlan is null");
             this.sessionContext = requireNonNull(sessionContext, "sessionContext is null");
             this.dispatchManager = requireNonNull(dispatchManager, "dispatchManager is null");
             this.queryId = dispatchManager.createQueryId();
@@ -379,7 +491,7 @@ public class QueuedStatementResource
         {
             if (submissionGate.compareAndSet(null, true)) {
                 querySpan.addEvent("submit");
-                creationFuture.setFuture(dispatchManager.createQuery(queryId, querySpan, slug, sessionContext, query));
+                creationFuture.setFuture(dispatchManager.createQuery(queryId, querySpan, slug, sessionContext, query, substraitPlan));
             }
         }
 

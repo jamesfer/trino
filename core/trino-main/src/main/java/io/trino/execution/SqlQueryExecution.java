@@ -47,6 +47,7 @@ import io.trino.execution.scheduler.faulttolerant.TaskDescriptorStorage;
 import io.trino.execution.scheduler.policy.ExecutionPolicy;
 import io.trino.execution.warnings.WarningCollector;
 import io.trino.failuredetector.FailureDetector;
+import io.trino.james.James;
 import io.trino.metadata.TableHandle;
 import io.trino.operator.ForScheduler;
 import io.trino.operator.RetryPolicy;
@@ -77,6 +78,7 @@ import io.trino.sql.planner.plan.OutputNode;
 import io.trino.sql.tree.ExplainAnalyze;
 import io.trino.sql.tree.Query;
 import io.trino.sql.tree.Statement;
+import io.trino.substrait.SubstraitToTrinoConverter;
 import org.joda.time.DateTime;
 
 import java.util.Collection;
@@ -132,6 +134,7 @@ public class SqlQueryExecution
     private final FailureDetector failureDetector;
 
     private final AtomicReference<QueryScheduler> queryScheduler = new AtomicReference<>();
+    private final Optional<io.substrait.plan.Plan> substraitPlan;
     private final AtomicReference<Plan> queryPlan = new AtomicReference<>();
     private final NodeTaskMap nodeTaskMap;
     private final ExecutionPolicy executionPolicy;
@@ -146,6 +149,7 @@ public class SqlQueryExecution
     private final EventDrivenTaskSourceFactory eventDrivenTaskSourceFactory;
     private final TaskDescriptorStorage taskDescriptorStorage;
     private final PlanOptimizersStatsCollector planOptimizersStatsCollector;
+    private final SubstraitToTrinoConverter substraitToTrinoConverter;
 
     private SqlQueryExecution(
             PreparedQuery preparedQuery,
@@ -182,7 +186,9 @@ public class SqlQueryExecution
             SqlTaskManager coordinatorTaskManager,
             ExchangeManagerRegistry exchangeManagerRegistry,
             EventDrivenTaskSourceFactory eventDrivenTaskSourceFactory,
-            TaskDescriptorStorage taskDescriptorStorage)
+            TaskDescriptorStorage taskDescriptorStorage,
+            Optional<io.substrait.plan.Plan> substraitPlan,
+            SubstraitToTrinoConverter substraitToTrinoConverter)
     {
         try (SetThreadName ignored = new SetThreadName("Query-%s", stateMachine.getQueryId())) {
             this.slug = requireNonNull(slug, "slug is null");
@@ -236,6 +242,10 @@ public class SqlQueryExecution
             this.eventDrivenTaskSourceFactory = requireNonNull(eventDrivenTaskSourceFactory, "taskSourceFactory is null");
             this.taskDescriptorStorage = requireNonNull(taskDescriptorStorage, "taskDescriptorStorage is null");
             this.planOptimizersStatsCollector = requireNonNull(planOptimizersStatsCollector, "planOptimizersStatsCollector is null");
+
+            // If the execution already has a plan, then we can skip the planning steps altogether
+            this.substraitPlan = requireNonNull(substraitPlan, "substraitPlan is null");
+            this.substraitToTrinoConverter = requireNonNull(substraitToTrinoConverter, "substraitToTrinoConverter is null");
         }
     }
 
@@ -484,18 +494,23 @@ public class SqlQueryExecution
 
     private PlanRoot doPlanQuery(CachingTableStatsProvider tableStatsProvider)
     {
-        // plan query
-        PlanNodeIdAllocator idAllocator = new PlanNodeIdAllocator();
-        LogicalPlanner logicalPlanner = new LogicalPlanner(stateMachine.getSession(),
-                planOptimizers,
-                idAllocator,
-                plannerContext,
-                statsCalculator,
-                costCalculator,
-                stateMachine.getWarningCollector(),
-                planOptimizersStatsCollector,
-                tableStatsProvider);
-        Plan plan = logicalPlanner.plan(analysis);
+        final var plan = substraitPlan
+                // If we have a substrait plan, use it for planning rather than the analysed query
+                .map(substrait -> this.substraitToTrinoConverter.convert(stateMachine.getSession(), substrait))
+                .orElseGet(() -> {
+                    // plan query
+                    PlanNodeIdAllocator idAllocator = new PlanNodeIdAllocator();
+                    LogicalPlanner logicalPlanner = new LogicalPlanner(stateMachine.getSession(),
+                            planOptimizers,
+                            idAllocator,
+                            plannerContext,
+                            statsCalculator,
+                            costCalculator,
+                            stateMachine.getWarningCollector(),
+                            planOptimizersStatsCollector,
+                            tableStatsProvider);
+                            return logicalPlanner.plan(analysis);
+                });
         queryPlan.set(plan);
 
         // fragment the plan
@@ -803,6 +818,7 @@ public class SqlQueryExecution
         private final ExchangeManagerRegistry exchangeManagerRegistry;
         private final EventDrivenTaskSourceFactory eventDrivenTaskSourceFactory;
         private final TaskDescriptorStorage taskDescriptorStorage;
+        private final SubstraitToTrinoConverter substraitToTrinoConverter;
 
         @Inject
         SqlQueryExecutionFactory(
@@ -834,7 +850,8 @@ public class SqlQueryExecution
                 SqlTaskManager coordinatorTaskManager,
                 ExchangeManagerRegistry exchangeManagerRegistry,
                 EventDrivenTaskSourceFactory eventDrivenTaskSourceFactory,
-                TaskDescriptorStorage taskDescriptorStorage)
+                TaskDescriptorStorage taskDescriptorStorage,
+                SubstraitToTrinoConverter substraitToTrinoConverter)
         {
             this.tracer = requireNonNull(tracer, "tracer is null");
             this.schedulerStats = requireNonNull(schedulerStats, "schedulerStats is null");
@@ -867,6 +884,7 @@ public class SqlQueryExecution
             this.exchangeManagerRegistry = requireNonNull(exchangeManagerRegistry, "exchangeManagerRegistry is null");
             this.eventDrivenTaskSourceFactory = requireNonNull(eventDrivenTaskSourceFactory, "eventDrivenTaskSourceFactory is null");
             this.taskDescriptorStorage = requireNonNull(taskDescriptorStorage, "taskDescriptorStorage is null");
+            this.substraitToTrinoConverter = substraitToTrinoConverter;
         }
 
         @Override
@@ -875,7 +893,8 @@ public class SqlQueryExecution
                 QueryStateMachine stateMachine,
                 Slug slug,
                 WarningCollector warningCollector,
-                PlanOptimizersStatsCollector planOptimizersStatsCollector)
+                PlanOptimizersStatsCollector planOptimizersStatsCollector,
+                Optional<io.substrait.plan.Plan> substraitPlan)
         {
             String executionPolicyName = SystemSessionProperties.getExecutionPolicy(stateMachine.getSession());
             ExecutionPolicy executionPolicy = executionPolicies.get(executionPolicyName);
@@ -916,7 +935,9 @@ public class SqlQueryExecution
                     coordinatorTaskManager,
                     exchangeManagerRegistry,
                     eventDrivenTaskSourceFactory,
-                    taskDescriptorStorage);
+                    taskDescriptorStorage,
+                    substraitPlan,
+                    substraitToTrinoConverter);
         }
     }
 }

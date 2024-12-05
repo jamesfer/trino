@@ -119,6 +119,7 @@ import io.trino.sql.tree.StartTransaction;
 import io.trino.sql.tree.Statement;
 import io.trino.sql.tree.TruncateTable;
 import io.trino.sql.tree.Use;
+import io.trino.substrait.SubstraitToTrinoConverter;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.inject.multibindings.MapBinder.newMapBinder;
@@ -135,6 +136,7 @@ public class QueryExecutionFactoryModule
                 newMapBinder(binder, new TypeLiteral<Class<? extends Statement>>() {}, new TypeLiteral<QueryExecutionFactory<?>>() {});
 
         binder.bind(SqlQueryExecutionFactory.class).in(Scopes.SINGLETON);
+        binder.bind(SubstraitToTrinoConverter.class).in(Scopes.SINGLETON);
         for (Class<? extends Statement> statement : getNonDataDefinitionStatements()) {
             executionBinder.addBinding(statement).to(SqlQueryExecutionFactory.class).in(Scopes.SINGLETON);
         }

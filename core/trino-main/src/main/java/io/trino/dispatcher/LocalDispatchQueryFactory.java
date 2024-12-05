@@ -38,6 +38,7 @@ import io.trino.security.AccessControl;
 import io.trino.server.protocol.Slug;
 import io.trino.spi.TrinoException;
 import io.trino.spi.resourcegroups.ResourceGroupId;
+import io.trino.sql.planner.Plan;
 import io.trino.sql.tree.Statement;
 import io.trino.transaction.TransactionId;
 import io.trino.transaction.TransactionManager;
@@ -111,7 +112,8 @@ public class LocalDispatchQueryFactory
             String query,
             PreparedQuery preparedQuery,
             Slug slug,
-            ResourceGroupId resourceGroup)
+            ResourceGroupId resourceGroup,
+            Optional<io.substrait.plan.Plan> substraitPlan)
     {
         WarningCollector warningCollector = warningCollectorFactory.create();
         PlanOptimizersStatsCollector planOptimizersStatsCollector = new PlanOptimizersStatsCollector(queryReportedRuleStatsLimit);
@@ -150,7 +152,7 @@ public class LocalDispatchQueryFactory
             }
 
             try {
-                return queryExecutionFactory.createQueryExecution(preparedQuery, stateMachine, slug, warningCollector, planOptimizersStatsCollector);
+                return queryExecutionFactory.createQueryExecution(preparedQuery, stateMachine, slug, warningCollector, planOptimizersStatsCollector, substraitPlan);
             }
             catch (Throwable e) {
                 if (e instanceof Error) {
