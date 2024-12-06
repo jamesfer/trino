@@ -327,7 +327,10 @@ public class DataDefinitionExecution<T extends Statement>
                 PlanOptimizersStatsCollector planOptimizersStatsCollector,
                 Optional<io.substrait.plan.Plan> substraitPlan)
         {
-            throw new UnsupportedOperationException();
+            if (substraitPlan.isPresent()) {
+                throw new UnsupportedOperationException("Substrait plan is not supported for DDL");
+            }
+            return createQueryExecution(preparedQuery, stateMachine, slug, warningCollector, planOptimizersStatsCollector);
         }
 
         private <T extends Statement> DataDefinitionExecution<T> createDataDefinitionExecution(

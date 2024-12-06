@@ -17,6 +17,7 @@ import io.trino.cost.StatsAndCosts;
 import io.trino.spi.type.BigintType;
 import io.trino.sql.ir.Constant;
 import io.trino.sql.ir.IrExpressions;
+import io.trino.sql.ir.Row;
 import io.trino.sql.planner.Plan;
 import io.trino.sql.planner.Symbol;
 import io.trino.sql.planner.plan.OutputNode;
@@ -36,7 +37,7 @@ public class James
                 new PlanNodeId("hard-coded-plan-node"),
                 List.of(new Symbol(BigintType.BIGINT, "column")),
                 1,
-                Optional.of(List.of(IrExpressions.row(List.of(new Constant(BigintType.BIGINT, 1L))))));
+                Optional.of(List.of(new Row(List.of(new Constant(BigintType.BIGINT, 1L))))));
         final var output = new OutputNode(
                 new PlanNodeId("hard-coded-plan-node"),
                 values,

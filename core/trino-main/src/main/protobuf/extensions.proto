@@ -32,10 +32,16 @@ message EventPlatformExtensionTable {
     repeated Column columns = 2;
 }
 
+message ArrayArgument {
+    repeated ArgumentValue values = 1;
+}
+
 message ArgumentValue {
     oneof value {
         int64 int64_value = 1;
         string string_value = 2;
+        bool bool_value = 3;
+        ArrayArgument array_value = 4;
     }
 }
 

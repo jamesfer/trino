@@ -5,7 +5,6 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import io.substrait.relation.Extension;
 import io.substrait.type.NamedStruct;
 import io.substrait.type.Type;
-import tutorial.Extensions;
 
 import java.util.Collections;
 import java.util.List;
@@ -33,21 +32,21 @@ public class TableExtensionDetailConverter {
 //        throw new IllegalArgumentException("Unknown extension table: %s".formatted(any.getTypeUrl()));
     }
 
-    public record EventPlatformExtensionTable(Extensions.EventPlatformExtensionTable extensionTable) implements Extension.ExtensionTableDetail {
-        @Override
-        public Any toProto() {
-            return Any.pack(this.extensionTable);
-        }
-
-        @Override
-        public NamedStruct deriveSchema() {
-            return NamedStruct.of(
-                    List.of("timestamp"),
-                    Type.Struct.builder()
-                            .addFields(Type.I64.builder().nullable(false).build())
-                            .nullable(false)
-                            .build()
-            );
-        }
-    }
+//    public record EventPlatformExtensionTable(Extensions.EventPlatformExtensionTable extensionTable) implements Extension.ExtensionTableDetail {
+//        @Override
+//        public Any toProto() {
+//            return Any.pack(this.extensionTable);
+//        }
+//
+//        @Override
+//        public NamedStruct deriveSchema() {
+//            return NamedStruct.of(
+//                    List.of("timestamp"),
+//                    Type.Struct.builder()
+//                            .addFields(Type.I64.builder().nullable(false).build())
+//                            .nullable(false)
+//                            .build()
+//            );
+//        }
+//    }
 }

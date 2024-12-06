@@ -67,7 +67,7 @@
         <dependency>
             <groupId>com.google.protobuf</groupId>
             <artifactId>protobuf-java-util</artifactId>
-            <version>3.25.5</version>
+            <version>4.29.1</version>
         </dependency>
 
         <dependency>
@@ -563,7 +563,8 @@
                             <inputDirectories>
                                 <include>src/main/protobuf</include>
                             </inputDirectories>
-                            <protocCommand>protoc</protocCommand>
+                            <protocVersion>3.23.0</protocVersion>
+<!--                            <protocCommand>protoc</protocCommand>-->
                         </configuration>
                     </execution>
                 </executions>

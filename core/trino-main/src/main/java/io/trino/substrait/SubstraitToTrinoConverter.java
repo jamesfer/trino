@@ -68,6 +68,7 @@ import io.trino.sql.ir.Constant;
 import io.trino.sql.ir.Expression;
 import io.trino.sql.ir.IrExpressions;
 import io.trino.sql.ir.Reference;
+import io.trino.sql.ir.Row;
 import io.trino.sql.planner.Plan;
 import io.trino.sql.planner.Symbol;
 import io.trino.sql.planner.plan.Assignments;
@@ -581,7 +582,7 @@ public class SubstraitToTrinoConverter
             this.session = session;
         }
 
-        private Constant convertStructToRow(io.substrait.expression.Expression.StructLiteral struct)
+        private Row convertStructToRow(io.substrait.expression.Expression.StructLiteral struct)
         {
             final var visitor = new ExpressionConverter();
             final var constants = struct.fields().stream()
@@ -590,10 +591,10 @@ public class SubstraitToTrinoConverter
                         if (!(expression instanceof Constant constant)) {
                             throw new IllegalArgumentException("Trino rows can only accept constant expressions. The converted expression was %s".formatted(expression));
                         }
-                        return constant;
+                        return (Expression) constant;
                     })
                     .toList();
-            return IrExpressions.row(constants);
+            return new Row(constants);
         }
 
         private List<Symbol> convertNamedStructToSymbols(NamedStruct namedStruct)

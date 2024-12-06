@@ -226,7 +226,7 @@ public class QueuedStatementResource
             throw badRequest(BAD_REQUEST, "SQL statement is empty");
         }
 
-        Query query = registerQuery(statement, servletRequest, httpHeaders);
+        Query query = registerQuery(statement, Optional.empty(), servletRequest, httpHeaders);
 
         return createQueryResultsResponse(query.getQueryResults(query.getLastToken(), uriInfo));
     }
@@ -239,10 +239,10 @@ public class QueuedStatementResource
             String substraitJson,
             @Context HttpServletRequest servletRequest,
             @Context HttpHeaders httpHeaders,
-            @BeanParam ExternalUriInfo externalUriInfo)
+            @Context UriInfo uriInfo)
     {
         if (isNullOrEmpty(substraitJson)) {
-            throw new BadRequestException("Substrait JSON is empty");
+            throw badRequest(BAD_REQUEST, "Substrait JSON is empty");
         }
 
         // Try to parse the substrait string into the protobuf class
@@ -255,7 +255,7 @@ public class QueuedStatementResource
                             .build())
                     .merge(substraitJson, substraitPlanBuilder);
         } catch (InvalidProtocolBufferException e) {
-            throw new BadRequestException("Invalid Substrait JSON. Error: %s".formatted(e.getMessage()), e);
+            throw badRequest(BAD_REQUEST, "Invalid Substrait JSON. Error: %s".formatted(e.getMessage()));
         }
 
         // Convert the protobuf class into a Substrait Plan object
@@ -266,7 +266,7 @@ public class QueuedStatementResource
             final var protoPlanConverter = new CustomProtoPlanConverter();
             substraitPlan = protoPlanConverter.from(substraitProtobufPlan);
         } catch (IOException e) {
-            throw new BadRequestException("Failed to convert Substrait protobuf plan to Substrait object", e);
+            throw badRequest(BAD_REQUEST, "Failed to convert Substrait protobuf plan to Substrait object");
         }
 
         // Convert substrait plan to Trino plan
@@ -279,7 +279,7 @@ public class QueuedStatementResource
 
         final var placeholderSqlQuery = "SELECT 'This is a substrait query'";
         Query query = registerQuery(placeholderSqlQuery, Optional.of(substraitPlan), servletRequest, httpHeaders);
-        return createQueryResultsResponse(query.getQueryResults(query.getLastToken(), externalUriInfo), query.sessionContext.getQueryDataEncoding());
+        return createQueryResultsResponse(query.getQueryResults(query.getLastToken(), uriInfo));
     }
 
     private Query registerQuery(String statement, Optional<io.substrait.plan.Plan> substraitPlan, HttpServletRequest servletRequest, HttpHeaders httpHeaders)
